@@ -109,3 +109,29 @@ def test_future_schema_is_not_downgraded_and_reserve_cannot_overdraw(tmp_path):
             "bad",
         )
     assert ledger.balance(reserve) == 100 and ledger.balance(cash) == 0
+
+
+@pytest.mark.parametrize("split", [False, True])
+def test_marking_reserve_preserves_metadata_corrections_without_new_spending(tmp_path, split):
+    s = Store(tmp_path / "db")
+    ledger = Ledger(s)
+    a = ledger.create_account("Cash", "UZS", 10000000, "2026-01-01")
+    b = ledger.create_account("Card", "UZS", 10000000, "2026-01-01", "card")
+    data = dict(kind="expense", account=a, amount=6000000, date="2026-01-02", category="Ovqat")
+    if split:
+        data["allocations"] = [{"account": a, "amount": 1700000}, {"account": b, "amount": 4300000}]
+    op = ledger.post(data, "expense")
+    reserved = b if split else a
+    ledger.set_reserve(reserved, True)
+    before = [ledger.balance(a), ledger.balance(b)]
+    new = ledger.replace(op, {**data, "note": "corrected note", "category": "Boshqa"}, "metadata")
+    assert [ledger.balance(a), ledger.balance(b)] == before
+    assert s.one("SELECT note FROM operations WHERE id=?", (new,))["note"] == "corrected note"
+    with pytest.raises(RuleError):
+        ledger.post(data, "new-spending")
+    changed = {**data, "amount": 7000000}
+    if split:
+        changed["allocations"] = [{"account": a, "amount": 1700000}, {"account": b, "amount": 5300000}]
+    with pytest.raises(RuleError):
+        ledger.replace(new, changed, "more-spending")
+    assert [ledger.balance(a), ledger.balance(b)] == before

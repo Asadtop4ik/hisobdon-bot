@@ -130,12 +130,6 @@ class Ledger:
             if b and a["id"] == b["id"]:
                 raise RuleError("Manba va qabul hisobi boshqa bo‘lsin.")
             kind = d.get("kind")
-            if kind not in {"transfer", "exchange"} and any(
-                acc["is_reserve"] for acc in [a] + ([b] if b else [])
-            ):
-                raise RuleError(
-                    "Zaxira bilan harakat uchun avval o‘tkazma qiling. Kundalik operatsiyada oddiy hisobni tanlang."
-                )
             postings = []
             if "allocations" in d and kind != "expense":
                 raise RuleError("Bo‘lib to‘lash faqat xarajat uchun.")
@@ -157,7 +151,6 @@ class Ledger:
                         if (
                             part_account["id"] in seen
                             or part_account["kind"] not in LIQUID
-                            or part_account["is_reserve"]
                             or part_account["archived"]
                             or part_account["currency"] != a["currency"]
                             or day < part_account["opened_on"]
@@ -213,6 +206,29 @@ class Ledger:
             totals = {}
             for account_id, delta in postings:
                 totals[account_id] = totals.get(account_id, 0) + delta
+            if kind not in {"transfer", "exchange"} and any(
+                self.account(aid)["is_reserve"] for aid in totals
+            ):
+                original = self.store.one("SELECT * FROM operations WHERE id=?", (d.get("replaces"),))
+                old_movements = {
+                    r["account_id"]: r["total"]
+                    for r in self.store.all(
+                        "SELECT account_id,SUM(amount) AS total FROM movements WHERE operation_id=? GROUP BY account_id",
+                        (d.get("replaces"),),
+                    )
+                }
+                metadata_only = (
+                    original
+                    and original["status"] == "cancelled"
+                    and original["kind"] == kind
+                    and original["day"] == day
+                    and original["amount"] == amount
+                    and old_movements == totals
+                )
+                if not metadata_only:
+                    raise RuleError(
+                        "Zaxira bilan harakat uchun avval o‘tkazma qiling. Eski yozuvning faqat izoh/kategoriyasini tuzatish mumkin."
+                    )
             for account_id, delta in totals.items():
                 acc = self.account(account_id)
                 if (

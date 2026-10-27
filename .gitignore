@@ -218,3 +218,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Hisobdon private runtime
+.env*
+!.env.example
+data/
+backups/
+exports/
+*.sqlite*
+*.db
+.superpowers/
+.ruff_cache/

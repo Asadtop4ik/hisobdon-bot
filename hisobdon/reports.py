@@ -157,6 +157,8 @@ def raw_messages(store, start, end):
             (start, end),
         )
     }
+    for op in store.all("SELECT payload FROM operations WHERE day>=? AND day<?", (start, end)):
+        linked.update(json.loads(op["payload"]).get("source_message_ids", []))
     result = []
     for m in store.all("SELECT * FROM messages ORDER BY received_at,id"):
         day = datetime.fromisoformat(m["received_at"]).astimezone(TZ).date().isoformat()

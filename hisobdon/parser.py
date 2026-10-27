@@ -36,6 +36,16 @@ def parse(text, now):
     day = now.date()
     result = {"date": day.isoformat(), "note": text}
     dates = re.findall(r"\b\d{4}-\d{2}-\d{2}\b", t)
+    relative = set(re.findall(r"\b(bugun|kecha|ertaga|indinga)\b", t))
+    if len(relative) > 1 or (dates and relative):
+        return {**result, "error": "Bir nechta sana ko‘rsatildi. Bitta aniq sanani yozing."}
+    if relative & {"ertaga", "indinga"}:
+        return {**result, "error": "Kelajak sanasiga operatsiya yozilmaydi. Haqiqiy sanani aniqlashtiring."}
+    if re.search(
+        r"\b(ertangi|kechagi|o‘tgan|oldingi|avvalgi|dushanba|seshanba|chorshanba|payshanba|juma|shanba|yakshanba)\b",
+        t,
+    ):
+        return {**result, "error": "Sanani YYYY-MM-DD shaklida aniq yozing."}
     if dates:
         try:
             if len(dates) != 1:
@@ -44,7 +54,7 @@ def parse(text, now):
             t = t.replace(dates[0], "")
         except ValueError:
             result["error"] = "Sanani YYYY-MM-DD shaklida aniqlashtiring."
-    elif "kecha" in t:
+    elif "kecha" in relative:
         day -= timedelta(days=1)
     result["date"] = day.isoformat()
     if day > now.date():

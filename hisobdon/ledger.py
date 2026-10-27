@@ -80,11 +80,20 @@ class Ledger:
 
     def _validate_principals(self):
         # Validate every historical prefix, not just the present balance.
+        parents = {
+            r["id"]: r["replaces"] for r in self.store.all("SELECT id,replaces FROM operations ORDER BY id")
+        }
+        roots = {}
+        for operation_id, parent in parents.items():
+            roots[operation_id] = roots[parent] if parent else operation_id
         for a in self.store.all("SELECT * FROM accounts WHERE kind NOT IN ('cash','card')"):
             total = a["opening"]
-            for row in self.store.all(
-                "SELECT m.amount FROM movements m JOIN operations o ON o.id=m.operation_id WHERE m.account_id=? AND o.status='active' ORDER BY o.day,o.id,m.id",
+            movements = self.store.all(
+                "SELECT m.amount,m.id AS movement_id,o.id AS operation_id,o.day FROM movements m JOIN operations o ON o.id=m.operation_id WHERE m.account_id=? AND o.status='active'",
                 (a["id"],),
+            )
+            for row in sorted(
+                movements, key=lambda r: (r["day"], roots[r["operation_id"]], r["movement_id"])
             ):
                 total += row["amount"]
                 if total < 0:

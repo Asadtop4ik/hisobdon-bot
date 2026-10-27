@@ -160,8 +160,20 @@ def text_chunks(text, limit=3800):
 def prepare_delivery(store, key, replies, export_dir):
     existing = store.one("SELECT * FROM deliveries WHERE key=?", (key,))
     if existing:
-        return existing
-    tasks = []
+        pending = json.loads(existing["tasks"])[existing["cursor"] :]
+        if all(t["kind"] != "file" or Path(t["path"]).is_file() for t in pending):
+            return existing
+    tasks = (
+        [
+            {
+                "kind": "text",
+                "text": "Tiklashdan keyin hisobot fayllari mavjud bazadan qayta tayyorlandi.",
+                "rows": [],
+            }
+        ]
+        if existing
+        else []
+    )
     for reply in replies:
         files = reply.get("files", [])
         if reply.get("export_range"):
@@ -174,7 +186,8 @@ def prepare_delivery(store, key, replies, export_dir):
             )
         tasks.extend({"kind": "file", "path": str(p)} for p in files)
     store.conn.execute(
-        "INSERT INTO deliveries(key,tasks) VALUES (?,?)", (key, json.dumps(tasks, ensure_ascii=False))
+        "INSERT INTO deliveries(key,tasks) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET tasks=excluded.tasks,cursor=0",
+        (key, json.dumps(tasks, ensure_ascii=False)),
     )
     return store.one("SELECT * FROM deliveries WHERE key=?", (key,))
 
@@ -279,7 +292,7 @@ async def scheduled_work(bot, store, cfg, now):
 
     # Separate from notification toggle: daily disaster-recovery copy at 03:00, and first startup.
     backup_day = now.date().isoformat() if now.hour >= 3 else (now.date() - timedelta(days=1)).isoformat()
-    if store.get("backup_day") != backup_day:
+    if store.get("backup_day") != backup_day or not Path(store.get("backup_file", "/nonexistent")).is_file():
         p = backup(store, cfg.data / "backups", cfg.backup_key)
         store.set("backup_file", str(p))
         store.set("backup_day", backup_day)

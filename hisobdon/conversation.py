@@ -58,6 +58,7 @@ class Engine:
         self.ledger = Ledger(store)
         self.owner_id = owner_id
         self.export_dir = export_dir
+        self.current_message_id = None
 
     def menu(self):
         return [
@@ -77,6 +78,10 @@ class Engine:
     def new(self, data):
         did = secrets.token_hex(4)
         data["rev"] = 0
+        if data["mode"] == "operation" and self.current_message_id is not None:
+            sources = data.setdefault("data", {}).setdefault("source_message_ids", [])
+            if self.current_message_id not in sources:
+                sources.append(self.current_message_id)
         self.s.save_draft(did, data)
         return did
 
@@ -93,6 +98,7 @@ class Engine:
 
     def message(self, text, message_id, now):
         mid = self.s.record_message(self.owner_id, message_id, text, now.isoformat())
+        self.current_message_id = mid
         text = text.strip()
         if text.startswith("/"):
             self.s.set("active_input", None)
@@ -119,6 +125,11 @@ class Engine:
         active = self.s.get("active_input")
         d = self.s.draft(active) if active else None
         if d and d.get("input") and not d.get("done"):
+            if d["mode"] == "operation":
+                sources = d["data"].setdefault("source_message_ids", [])
+                if mid not in sources:
+                    sources.append(mid)
+                self.s.save_draft(active, d)
             try:
                 value = self.input_value(text, d["input"])
                 self.s.conn.execute("UPDATE messages SET status='answer' WHERE id=?", (mid,))
@@ -160,6 +171,7 @@ class Engine:
         return text
 
     def callback(self, payload, now):
+        self.current_message_id = None
         try:
             parts = payload.split(":")
             cmd = parts[0]

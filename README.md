@@ -76,3 +76,23 @@ Tasdiqlangan umumiy dizayn va bajarish rejasi `docs/superpowers/` ichida. Shaxsi
 `/debts` orqali qarzni oching. **Qaytarilgan pulni kiritish** (siz bergan qarz) yoki **Qarzni qaytarish** (siz olgan qarz) tugmasini bosing. **To‘liq** qolgan summani oladi; **Qisman qaytarish** summani kiritishni so‘raydi. Keyin pul tushgan yoki pul ketgan karta/naqd hisobni tanlab saqlang.
 
 Kirim kategoriya oynasida **Qarz qaytdi**, chiqim oynasida **Qarzni qaytardim** yo‘li ham bor. Bu oddiy daromad/xarajat emas: pul hisobini va tegishli qarz qoldig‘ini birga yangilaydi. Qoldiq 0 bo‘lganda qarz **Yopilgan qarzlar** ro‘yxatida qoladi; tarix o‘chirilmaydi. Qaytarishni bekor qilsangiz, qarz qayta ochiladi.
+
+## Qora kun uchun zaxira
+
+**Hisoblar → Hisob qo‘shish → Zaxira (uydagi naqd)** orqali UZS va USD uchun alohida hisob oching. Aniq boshlang‘ich qoldiqni o‘zingiz kiriting. Mavjud karta/naqd hisob oynasida **Zaxira deb belgilash** va **Kundalik hisob qilish** bor.
+
+Zaxira sof moliyaviy holatga kiradi, **Sarflash mumkin** qoldig‘iga kirmaydi. Zaruratda **Yozuv → O‘z hisoblarim orasida** orqali oddiy hisobga o‘tkazing, keyin xarajat yozing. O‘tkazishning o‘zi xarajat emas.
+
+## Bitta xarajatni bir nechta hisobdan to‘lash
+
+Xarajat summasi/kategoriyasidan keyin **Bo‘lib to‘lash — naqd + karta** ni tanlang. Har bir hisobdan to‘langan summani kiriting; oxirgisida **Qolgan** tugmasi bor. Masalan, 60 000 UZS xarajat = 17 000 naqd + 43 000 karta. Jami xarajat bir marta sanaladi. Qismlar bitta valyutada bo‘lishi kerak; zaxira bevosita ishlatilmaydi.
+
+## To‘liq AI paketi
+
+Har bir qo‘lda/oylik eksport bir izchil snapshotdan **Excel + promptli TXT + canonical JSON + manifest.json** tayyorlaydi. Tanlangan davr xulosasi alohida, moliyaviy arxiv esa barcha davrlarni qamraydi: hisoblar va boshlang‘ich qoldiqlar, barcha operatsiya versiyalari, signed pul harakatlari, baholash/kurs tarixi, kategoriyalar/kalit so‘zlar, asl xabarlar, qoralamalar va audit.
+
+Joriy holat bilan davr oxiri ajratilgan. `manifest.json` satrlar soni va fayl hashlarini ko‘rsatadi; barcha raqamlangan qismlarni birga o‘qing. TXT va JSON bir xil canonical yozuvlarni saqlaydi; ularni Excel bilan takror qo‘shmang. Excel katagi limitiga sig‘magan uzun matnning to‘liq qiymati TXT/JSON’da saqlanadi.
+
+Texnik inbox/outbox, scheduler holati, server maxfiy sozlamalari va Telegram marshrutlash ID’lari AI paketiga kirmaydi. Asl foydalanuvchi matnlari o‘z holicha kiradi. To‘liq moliyaviy arxiv tiklash uchun SQLite backup o‘rnini bosmaydi.
+
+Reserve migration: DB schema v2 adds `is_reserve`, preserves existing balances, and refuses unknown newer versions. Before upgrading, take an encrypted backup. After reserve accounts exist, do not roll back to pre-reserve code that ignores their purpose; restore a reviewed pre-upgrade backup only with awareness of later-record loss, or fix forward.

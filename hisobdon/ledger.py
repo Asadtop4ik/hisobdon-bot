@@ -36,10 +36,12 @@ class Ledger:
     def __init__(self, store):
         self.store = store
 
-    def create_account(self, name, currency, opening, at, kind="cash", due=None):
+    def create_account(self, name, currency, opening, at, kind="cash", due=None, is_reserve=False):
         at = valid_day(at)
         if kind not in KINDS or currency not in {"UZS", "USD"}:
             raise RuleError("Hisob turi yoki valyutasi noto‘g‘ri.")
+        if type(is_reserve) is not bool or (is_reserve and kind not in LIQUID):
+            raise RuleError("Zaxira belgisi faqat karta yoki naqd hisob uchun.")
         if not name.strip() or len(name) > 80:
             raise RuleError("Hisob nomi 1–80 belgi bo‘lsin.")
         if type(opening) is not int or opening < 0 or opening > MAX_AMOUNT:
@@ -48,11 +50,22 @@ class Ledger:
             date.fromisoformat(due)
         with self.store.transaction():
             cur = self.store.conn.execute(
-                "INSERT INTO accounts(name,currency,kind,opening,opened_on,due,created_at) VALUES (?,?,?,?,?,?,?)",
-                (name.strip(), currency, kind, opening, at, due, utcnow()),
+                "INSERT INTO accounts(name,currency,kind,opening,opened_on,due,created_at,is_reserve) VALUES (?,?,?,?,?,?,?,?)",
+                (name.strip(), currency, kind, opening, at, due, utcnow(), int(is_reserve)),
             )
             self.store.audit("account_create", cur.lastrowid, {"opening": opening, "day": at})
             return cur.lastrowid
+
+    def set_reserve(self, account_id, enabled):
+        with self.store.transaction():
+            a = self.account(account_id)
+            if a["kind"] not in LIQUID or a["archived"] or type(enabled) is not bool:
+                raise RuleError("Faol karta yoki naqd hisobni tanlang.")
+            if bool(a["is_reserve"]) == enabled:
+                return
+            self.store.conn.execute("UPDATE accounts SET is_reserve=? WHERE id=?", (int(enabled), account_id))
+            self._validate_principals()
+            self.store.audit("reserve_marker", account_id, {"old": bool(a["is_reserve"]), "new": enabled})
 
     def account(self, account_id):
         acc = self.store.one("SELECT * FROM accounts WHERE id=?", (account_id,))
@@ -86,7 +99,7 @@ class Ledger:
         roots = {}
         for operation_id, parent in parents.items():
             roots[operation_id] = roots[parent] if parent else operation_id
-        for a in self.store.all("SELECT * FROM accounts WHERE kind NOT IN ('cash','card')"):
+        for a in self.store.all("SELECT * FROM accounts WHERE kind NOT IN ('cash','card') OR is_reserve=1"):
             total = a["opening"]
             movements = self.store.all(
                 "SELECT m.amount,m.id AS movement_id,o.id AS operation_id,o.day FROM movements m JOIN operations o ON o.id=m.operation_id WHERE m.account_id=? AND o.status='active'",
@@ -98,7 +111,7 @@ class Ledger:
                 total += row["amount"]
                 if total < 0:
                     raise RuleError(
-                        "Qarz/investitsiya qoldig‘i yetarli emas yoki keyingi harakatga zid. Avval bog‘liq harakatni tuzating."
+                        "Qarz/investitsiya/zaxira qoldig‘i yetarli emas yoki keyingi harakatga zid. Avval bog‘liq harakatni tuzating."
                     )
 
     def post(self, data, key):
@@ -117,11 +130,45 @@ class Ledger:
             if b and a["id"] == b["id"]:
                 raise RuleError("Manba va qabul hisobi boshqa bo‘lsin.")
             kind = d.get("kind")
+            if kind not in {"transfer", "exchange"} and any(
+                acc["is_reserve"] for acc in [a] + ([b] if b else [])
+            ):
+                raise RuleError(
+                    "Zaxira bilan harakat uchun avval o‘tkazma qiling. Kundalik operatsiyada oddiy hisobni tanlang."
+                )
             postings = []
+            if "allocations" in d and kind != "expense":
+                raise RuleError("Bo‘lib to‘lash faqat xarajat uchun.")
             if kind in {"income", "expense", "interest_income", "interest_expense"}:
                 if a["kind"] not in LIQUID:
                     raise RuleError("Karta yoki naqd hisobni tanlang.")
                 postings = [(a["id"], amount if kind in INCOME else -amount)]
+                if "allocations" in d:
+                    parts = d["allocations"]
+                    if not isinstance(parts, list) or not 1 <= len(parts) <= 20:
+                        raise RuleError("To‘lov qismlari noto‘g‘ri.")
+                    postings = []
+                    seen = set()
+                    for part in parts:
+                        if not isinstance(part, dict) or type(part.get("account")) is not int:
+                            raise RuleError("To‘lov hisobi noto‘g‘ri.")
+                        part_account = self.account(part["account"])
+                        part_amount = positive(part.get("amount"))
+                        if (
+                            part_account["id"] in seen
+                            or part_account["kind"] not in LIQUID
+                            or part_account["is_reserve"]
+                            or part_account["archived"]
+                            or part_account["currency"] != a["currency"]
+                            or day < part_account["opened_on"]
+                        ):
+                            raise RuleError(
+                                "Har bir qism alohida faol, bir xil valyutadagi kundalik hisobdan bo‘lsin."
+                            )
+                        seen.add(part_account["id"])
+                        postings.append((part_account["id"], -part_amount))
+                    if parts[0]["account"] != a["id"] or sum(-delta for _, delta in postings) != amount:
+                        raise RuleError("To‘lov qismlari jami xarajat summasiga teng bo‘lsin.")
             elif kind in {"transfer", "exchange"}:
                 if not b or a["kind"] not in LIQUID or b["kind"] not in LIQUID:
                     raise RuleError("Ikkita pul hisobini tanlang.")

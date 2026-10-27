@@ -29,6 +29,7 @@ ACCOUNT_LABELS = {
     "debt_lent": "Menga qaytariladigan qarz",
     "debt_borrowed": "Men qaytaradigan qarz",
     "investment": "Investitsiya",
+    "reserve": "Zaxira (uydagi naqd)",
 }
 ENTITY = {
     "lend": "debt_lent",
@@ -221,6 +222,11 @@ class Engine:
                 return self.edit_menu(did, self.s.draft(did))
             if cmd == "a":
                 return self.account_detail(int(parts[1]))
+            if cmd == "reserve":
+                if parts[2] not in {"0", "1"}:
+                    raise RuleError("Zaxira belgisi noto‘g‘ri.")
+                self.ledger.set_reserve(int(parts[1]), parts[2] == "1")
+                return self.account_detail(int(parts[1]))
             if cmd == "repay":
                 debt = self.ledger.account(int(parts[1]))
                 if debt["kind"] not in {"debt_lent", "debt_borrowed"} or debt["archived"]:
@@ -263,12 +269,41 @@ class Engine:
         step = d["step"]
         data = d.setdefault("data", {})
         if (
+            step == "account"
+            and isinstance(value, dict)
+            and value.get("split")
+            and data.get("kind") == "expense"
+        ):
+            data["allocations"] = []
+            return self.advance(did, d, now)
+        if step == "split_account":
+            if value == "restart":
+                data["allocations"] = []
+                data.pop("account", None)
+                d.pop("split_account", None)
+            else:
+                d["split_account"] = value
+            return self.advance(did, d, now)
+        if step == "split_amount":
+            remaining = data["amount"] - sum(p["amount"] for p in data["allocations"])
+            if type(value) is not int or not 0 < value <= remaining:
+                raise RuleError("Bu qism qolgan to‘lov summasidan oshmasin.")
+            account = self.ledger.account(d["split_account"])
+            data["allocations"].append({"account": account["id"], "amount": value})
+            data["currency"] = account["currency"]
+            d.pop("split_account", None)
+            return self.advance(did, d, now)
+        if (
             step == "category"
             and isinstance(value, dict)
             and value.get("operation") in {"repay_lent", "repay_borrowed"}
         ):
             data["kind"] = value["operation"]
             data.pop("category", None)
+            data.pop("allocations", None)
+            data.pop("account", None)
+            data.pop("target", None)
+            d.pop("split_account", None)
             d["debt_first"] = True
             return self.advance(did, d, now)
         if step == "amount" and value == "partial":
@@ -278,6 +313,10 @@ class Engine:
                 d["editing"] = False
                 return self.save_operation(did, d)
             data.pop(value, None)
+            if value in {"account", "amount"} and "allocations" in data:
+                data["allocations"] = []
+                data.pop("account", None)
+                d.pop("split_account", None)
             if value == "account" and data.get("kind") not in {"repay_lent", "repay_borrowed"}:
                 data.pop("target", None)
             if value == "note":
@@ -447,6 +486,10 @@ class Engine:
                     f"{LABELS[kind]} • {money(data['amount'], data.get('currency', ''))}\nKategoriyani tanlang:",
                     [repayment] + [(c["name"], c["name"]) for c in cats] + [("Yangi kategoriya", "new")],
                 )
+            if kind == "expense" and "allocations" in data:
+                split_reply = self.advance_split(did, d)
+                if split_reply is not None:
+                    return split_reply
             if not data.get("account"):
                 kinds = {"investment"} if kind == "invest_income" else LIQUID
                 accounts = [
@@ -454,6 +497,7 @@ class Engine:
                     for a in self.ledger.balances()
                     if not a["archived"]
                     and a["kind"] in kinds
+                    and (not a["is_reserve"] or kind in {"transfer", "exchange"})
                     and (not data.get("currency") or a["currency"] == data["currency"])
                 ]
                 if not accounts:
@@ -475,7 +519,8 @@ class Engine:
                     d,
                     "account",
                     f"{LABELS[kind]} • {money(data['amount'], data.get('currency', ''))} • {data.get('category', '')}\nSana: {data['date']}\n{account_question}",
-                    [(f"{a['name']} · {money(a['balance'], a['currency'])}", a["id"]) for a in accounts],
+                    [(f"{a['name']} · {money(a['balance'], a['currency'])}", a["id"]) for a in accounts]
+                    + ([("Bo‘lib to‘lash — naqd + karta", {"split": True})] if kind == "expense" else []),
                 )
             a = self.ledger.account(data["account"])
             data["currency"] = a["currency"]
@@ -512,7 +557,10 @@ class Engine:
                 accounts = [
                     b
                     for b in self.ledger.balances()
-                    if not b["archived"] and b["kind"] in LIQUID and b["currency"] == a["currency"]
+                    if not b["archived"]
+                    and b["kind"] in LIQUID
+                    and b["currency"] == a["currency"]
+                    and not b["is_reserve"]
                 ]
                 return self.ask(
                     did,
@@ -536,12 +584,49 @@ class Engine:
             if d.pop("return_edit", False) or d.get("editing"):
                 d["editing"] = True
                 return self.edit_menu(did, d)
-            if kind not in {"income", "expense"} or data.get("replaces"):
+            if kind not in {"income", "expense"} or data.get("replaces") or "allocations" in data:
                 return self.ask(
                     did, d, "confirm", self.preview(data) + "\nSaqlaysizmi?", [("Saqlash", "save")]
                 )
             return self.save_operation(did, d)
         return self.menu()
+
+    def advance_split(self, did, d):
+        data = d["data"]
+        parts = data["allocations"]
+        remaining = data["amount"] - sum(p["amount"] for p in parts)
+        if remaining == 0 and parts:
+            data["account"] = parts[0]["account"]
+            return None
+        if remaining <= 0:
+            raise RuleError("To‘lov qismlari jami summadan oshdi.")
+        if d.get("split_account"):
+            account = self.ledger.account(d["split_account"])
+            return self.ask(
+                did,
+                d,
+                "split_amount",
+                f"{account['name']}: qancha to‘landi?\nQolgan: {money(remaining, account['currency'])}",
+                [(f"Qolgan {money(remaining, account['currency'])}", remaining)],
+                input_type="amount",
+            )
+        used = {p["account"] for p in parts}
+        accounts = [
+            a
+            for a in self.ledger.balances()
+            if a["kind"] in LIQUID
+            and not a["is_reserve"]
+            and not a["archived"]
+            and a["id"] not in used
+            and (not data.get("currency") or a["currency"] == data["currency"])
+        ]
+        options = [(f"{a['name']} · {money(a['balance'], a['currency'])}", a["id"]) for a in accounts]
+        if parts:
+            options.append(("Qismlarni boshidan kiritish", "restart"))
+        text = f"Bo‘lib to‘lash\nJami: {money(data['amount'], data.get('currency', ''))}\nQolgan: {money(remaining, data.get('currency', ''))}\nKeyingi to‘lov hisobini tanlang:"
+        if not accounts:
+            text += "\nBoshqa mos hisob yo‘q. Qismlarni qayta kiriting yoki /accounts orqali hisob qo‘shing."
+        return self.ask(did, d, "split_account", text, options)
 
     def edit_menu(self, did, d):
         fields = [("Summa", "amount"), ("Sana", "date"), ("Hisob", "account"), ("Izoh", "note")]
@@ -569,6 +654,11 @@ class Engine:
                 text += f" · {money(data['received'], b['currency'])}"
         if data.get("category"):
             text += f"\nKategoriya: {data['category']}"
+        if data.get("allocations"):
+            text += "\nTo‘lov qismlari:"
+            for part in data["allocations"]:
+                account = self.ledger.account(part["account"])
+                text += f"\n  {account['name']}: {money(part['amount'], account['currency'])}"
         if data.get("fee"):
             text += f"\nKomissiya: {money(data['fee'], a['currency'])}"
         if data.get("note"):
@@ -589,6 +679,14 @@ class Engine:
             return [Reply(str(exc), [[("Qoralamalar", "m:drafts"), ("Menyu", "m:menu")]])]
         self.done(did, d)
         a = self.ledger.account(data["account"])
+        balance_result = f"Qoldiq: {money(self.ledger.balance(a['id']), a['currency'])}"
+        if data.get("allocations"):
+            balance_result = "Hisoblar qoldig‘i:"
+            for part in data["allocations"]:
+                account = self.ledger.account(part["account"])
+                balance_result += (
+                    f"\n  {account['name']}: {money(self.ledger.balance(account['id']), account['currency'])}"
+                )
         debt_result = ""
         extra_buttons = []
         if data["kind"] in {"repay_lent", "repay_borrowed"}:
@@ -602,7 +700,7 @@ class Engine:
             extra_buttons = [[("Qarzni ko‘rish", f"a:{debt['id']}"), ("Qarzlar", "m:debts")]]
         return [
             Reply(
-                f"Saqlandi #{op}\n{self.preview(data)}\nQoldiq: {money(self.ledger.balance(a['id']), a['currency'])}{debt_result}",
+                f"Saqlandi #{op}\n{self.preview(data)}\n{balance_result}{debt_result}",
                 [[("Tuzatish", f"e:{op}"), ("Bekor qilish", f"x:{op}")]]
                 + extra_buttons
                 + [[("Menyu", "m:menu")]],
@@ -627,8 +725,9 @@ class Engine:
                     data["currency"],
                     data["opening"],
                     data["opened_on"],
-                    data["kind"],
+                    "cash" if data["kind"] == "reserve" else data["kind"],
                     data.get("due"),
+                    is_reserve=data["kind"] == "reserve",
                 )
                 self.done(did, d)
                 return self.account_detail(aid)
@@ -666,6 +765,17 @@ class Engine:
         a = self.ledger.account(aid)
         buttons = [("Boshlang‘ich qoldiqni tuzatish", f"opening:{aid}")]
         status = ""
+        if a["kind"] in LIQUID:
+            status = "\nMaqsad: " + (
+                "Zaxira — kundalik sarfga kirmaydi" if a["is_reserve"] else "Kundalik hisob"
+            )
+            if not a["archived"]:
+                buttons.append(
+                    (
+                        "Kundalik hisob qilish" if a["is_reserve"] else "Zaxira deb belgilash",
+                        f"reserve:{aid}:{0 if a['is_reserve'] else 1}",
+                    )
+                )
         if a["kind"] == "investment":
             buttons.append(("Joriy qiymatni kiritish", f"value:{aid}"))
         if a["kind"].startswith("debt_"):
@@ -919,7 +1029,7 @@ class Engine:
         # Transport generates the snapshot after the conversation transaction commits.
         return [
             Reply(
-                f"Hisobot: {start} — {(date.fromisoformat(end) - timedelta(days=1)).isoformat()}\nExcel va TXT ichida tayyor AI prompt mavjud.",
+                f"Davr xulosasi: {start} — {(date.fromisoformat(end) - timedelta(days=1)).isoformat()}\nExcel + tayyor promptli TXT + JSON: barcha davrlarning to‘liq moliyaviy arxivi. Barcha qismlarni birga yuklang; bir xil yozuvlarni fayllar orasida takror hisoblamang.",
                 export_range=(start, end),
             )
         ]

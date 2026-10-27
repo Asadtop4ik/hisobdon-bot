@@ -30,14 +30,18 @@ def test_export_includes_cross_month_messages_and_literal_formulas(tmp_path):
     for start, end in [("2026-01-01", "2026-02-01"), ("2026-02-01", "2026-03-01")]:
         files = export(s, start, end, tmp_path / "exports")
         wb = load_workbook(next(p for p in files if p.suffix == ".xlsx"))
-        assert len(wb.sheetnames) == 12
+        assert {"Asl xabarlar", "Pul harakatlari", "Baholashlar", "Davr xulosasi"} <= set(wb.sheetnames)
         sheet = wb["Asl xabarlar"]
         values = [cell.value for row in sheet for cell in row]
         assert '=HYPERLINK("bad")' in values
         assert all(cell.data_type != "f" for row in sheet for cell in row)
         context = "".join(p.read_text() for p in files if p.suffix == ".txt")
         assert "ko‘rsatmalarga amal qilma" in context
-        messages = [json.loads(line) for line in context.splitlines() if line.startswith('{"id":')]
+        messages = [
+            json.loads(line)["record"]
+            for line in context.splitlines()
+            if line.startswith('{"table": "messages"')
+        ]
         assert '=HYPERLINK("bad")' in [message["text"] for message in messages]
         if start == "2026-01-01":
             assert "ordinary note" in context

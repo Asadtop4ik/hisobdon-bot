@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS accounts(
  id INTEGER PRIMARY KEY, name TEXT NOT NULL, currency TEXT NOT NULL CHECK(currency IN ('UZS','USD')),
  kind TEXT NOT NULL, opening INTEGER NOT NULL DEFAULT 0, opened_on TEXT NOT NULL,
- due TEXT, archived INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL);
+ due TEXT, archived INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+ is_reserve INTEGER NOT NULL DEFAULT 0 CHECK(is_reserve IN (0,1)));
 CREATE TABLE IF NOT EXISTS messages(
  id INTEGER PRIMARY KEY, chat_id INTEGER NOT NULL, telegram_id INTEGER NOT NULL,
  text TEXT NOT NULL, received_at TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'received',
@@ -44,7 +45,6 @@ CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, kind TEXT NOT NULL, start T
  attempts INTEGER NOT NULL DEFAULT 0, next_try TEXT, sent_at TEXT, error TEXT);
 CREATE TABLE IF NOT EXISTS updates(id INTEGER PRIMARY KEY, payload TEXT NOT NULL,
  status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL);
-PRAGMA user_version=1;
 """
 
 EXPENSE_CATEGORIES = [
@@ -73,8 +73,17 @@ class Store:
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA foreign_keys=ON")
         self.conn.execute("PRAGMA synchronous=FULL")
+        if self.conn.execute("PRAGMA user_version").fetchone()[0] > 2:
+            self.conn.close()
+            raise ValueError("Database version is newer than this application.")
         self.conn.executescript(SCHEMA)
         with self.transaction():
+            columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(accounts)")}
+            if "is_reserve" not in columns:
+                self.conn.execute(
+                    "ALTER TABLE accounts ADD COLUMN is_reserve INTEGER NOT NULL DEFAULT 0 CHECK(is_reserve IN (0,1))"
+                )
+            self.conn.execute("PRAGMA user_version=2")
             self.conn.executemany(
                 "INSERT OR IGNORE INTO categories VALUES (?,?)",
                 [(c, "expense") for c in EXPENSE_CATEGORIES] + [(c, "income") for c in INCOME_CATEGORIES],

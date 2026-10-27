@@ -221,6 +221,25 @@ class Engine:
                 return self.edit_menu(did, self.s.draft(did))
             if cmd == "a":
                 return self.account_detail(int(parts[1]))
+            if cmd == "repay":
+                debt = self.ledger.account(int(parts[1]))
+                if debt["kind"] not in {"debt_lent", "debt_borrowed"} or debt["archived"]:
+                    raise RuleError("Faol qarzni tanlang.")
+                if self.ledger.balance(debt["id"]) <= 0:
+                    return self.account_detail(debt["id"])
+                did = self.new(
+                    {
+                        "mode": "operation",
+                        "debt_first": True,
+                        "data": {
+                            "kind": "repay_lent" if debt["kind"] == "debt_lent" else "repay_borrowed",
+                            "target": debt["id"],
+                            "currency": debt["currency"],
+                            "date": now.date().isoformat(),
+                        },
+                    }
+                )
+                return self.advance(did, self.s.draft(did), now)
             if cmd == "archive":
                 a = self.ledger.account(int(parts[1]))
                 if self.ledger.balance(a["id"]) != 0:
@@ -243,6 +262,17 @@ class Engine:
     def accept(self, did, d, value, now):
         step = d["step"]
         data = d.setdefault("data", {})
+        if (
+            step == "category"
+            and isinstance(value, dict)
+            and value.get("operation") in {"repay_lent", "repay_borrowed"}
+        ):
+            data["kind"] = value["operation"]
+            data.pop("category", None)
+            d["debt_first"] = True
+            return self.advance(did, d, now)
+        if step == "amount" and value == "partial":
+            return self.ask(did, d, "amount", "Qaytarilgan qismining summasini yozing:", input_type="amount")
         if step == "edit_field":
             if value == "save":
                 d["editing"] = False
@@ -334,7 +364,50 @@ class Engine:
             kind = data.get("kind")
             if not kind:
                 return self.ask(did, d, "kind", "Bu qanday operatsiya?", [(v, k) for k, v in LABELS.items()])
+            if d.get("debt_first") and kind in {"repay_lent", "repay_borrowed"} and not data.get("target"):
+                debts = [
+                    a
+                    for a in self.ledger.balances()
+                    if not a["archived"]
+                    and a["kind"] == ENTITY[kind]
+                    and a["balance"] > 0
+                    and (not data.get("currency") or a["currency"] == data["currency"])
+                ]
+                if not debts:
+                    return [
+                        Reply(
+                            "Mos ochiq qarz topilmadi. Avval qarzni boshlang‘ich qoldiq bilan kiriting.",
+                            [[("Qarzlar", "m:debts"), ("Qoralamalar", "m:drafts")]],
+                        )
+                    ]
+                return self.ask(
+                    did,
+                    d,
+                    "target",
+                    "Qaysi qarz qaytarildi?",
+                    [(f"{a['name']} · {money(a['balance'], a['currency'])}", a["id"]) for a in debts],
+                )
+            if d.get("debt_first") and data.get("target"):
+                data["currency"] = self.ledger.account(data["target"])["currency"]
             if not data.get("amount"):
+                if kind in {"repay_lent", "repay_borrowed"} and data.get("target"):
+                    debt = self.ledger.account(data["target"])
+                    balance = self.ledger.balance(debt["id"])
+                    if balance <= 0:
+                        return [
+                            Reply("Bu qarz yopilgan. Yangi qaytarish yozilmaydi.", [[("Qarzlar", "m:debts")]])
+                        ]
+                    return self.ask(
+                        did,
+                        d,
+                        "amount",
+                        f"{debt['name']}\nQolgan qarz: {money(balance, debt['currency'])}\nQancha qaytarildi?",
+                        [
+                            (f"To‘liq — {money(balance, debt['currency'])}", balance),
+                            ("Qisman qaytarish", "partial"),
+                        ],
+                        input_type="amount",
+                    )
                 return self.ask(
                     did, d, "amount", "Summani yozing (masalan: 40000 yoki 12.50):", input_type="amount"
                 )
@@ -352,12 +425,17 @@ class Engine:
                 )
             if kind in {"income", "expense"} and not data.get("category"):
                 cats = self.s.all("SELECT name FROM categories WHERE kind=? ORDER BY rowid", (kind,))
+                repayment = (
+                    ("Qarz qaytdi", {"operation": "repay_lent"})
+                    if kind == "income"
+                    else ("Qarzni qaytardim", {"operation": "repay_borrowed"})
+                )
                 return self.ask(
                     did,
                     d,
                     "category",
                     f"{LABELS[kind]} • {money(data['amount'], data.get('currency', ''))}\nKategoriyani tanlang:",
-                    [(c["name"], c["name"]) for c in cats] + [("Yangi kategoriya", "new")],
+                    [repayment] + [(c["name"], c["name"]) for c in cats] + [("Yangi kategoriya", "new")],
                 )
             if not data.get("account"):
                 kinds = {"investment"} if kind == "invest_income" else LIQUID
@@ -375,11 +453,18 @@ class Engine:
                             [[("Hisob qo‘shish", "m:newaccount"), ("Qoralamalar", "m:drafts")]],
                         )
                     ]
+                account_question = (
+                    "Pul qayerga tushdi — karta yoki naqd?"
+                    if kind == "repay_lent"
+                    else "Pul qaysi hisobdan qaytarildi — karta yoki naqd?"
+                    if kind == "repay_borrowed"
+                    else "Hisobni tanlang:"
+                )
                 return self.ask(
                     did,
                     d,
                     "account",
-                    f"{LABELS[kind]} • {money(data['amount'], data.get('currency', ''))} • {data.get('category', '')}\nSana: {data['date']}\nHisobni tanlang:",
+                    f"{LABELS[kind]} • {money(data['amount'], data.get('currency', ''))} • {data.get('category', '')}\nSana: {data['date']}\n{account_question}",
                     [(f"{a['name']} · {money(a['balance'], a['currency'])}", a["id"]) for a in accounts],
                 )
             a = self.ledger.account(data["account"])
@@ -392,6 +477,7 @@ class Engine:
                     if not b["archived"]
                     and b["id"] != a["id"]
                     and ((b["kind"] == target_kind) if target_kind else b["kind"] in LIQUID)
+                    and (kind not in {"repay_lent", "repay_borrowed"} or b["balance"] > 0)
                     and (
                         (b["currency"] != a["currency"])
                         if kind == "exchange"
@@ -493,10 +579,23 @@ class Engine:
             return [Reply(str(exc), [[("Qoralamalar", "m:drafts"), ("Menyu", "m:menu")]])]
         self.done(did, d)
         a = self.ledger.account(data["account"])
+        debt_result = ""
+        extra_buttons = []
+        if data["kind"] in {"repay_lent", "repay_borrowed"}:
+            debt = self.ledger.account(data["target"])
+            remaining = self.ledger.balance(debt["id"])
+            debt_result = (
+                f"\nQolgan qarz: {money(remaining, debt['currency'])}"
+                if remaining
+                else "\nQarz to‘liq yopildi. Tarix saqlandi."
+            )
+            extra_buttons = [[("Qarzni ko‘rish", f"a:{debt['id']}"), ("Qarzlar", "m:debts")]]
         return [
             Reply(
-                f"Saqlandi #{op}\n{self.preview(data)}\nQoldiq: {money(self.ledger.balance(a['id']), a['currency'])}",
-                [[("Tuzatish", f"e:{op}"), ("Bekor qilish", f"x:{op}")], [("Menyu", "m:menu")]],
+                f"Saqlandi #{op}\n{self.preview(data)}\nQoldiq: {money(self.ledger.balance(a['id']), a['currency'])}{debt_result}",
+                [[("Tuzatish", f"e:{op}"), ("Bekor qilish", f"x:{op}")]]
+                + extra_buttons
+                + [[("Menyu", "m:menu")]],
             )
         ]
 
@@ -525,13 +624,30 @@ class Engine:
                 return self.account_detail(aid)
             return self.finish_setting(did, d, now)
 
-    def accounts(self, kinds):
+    def accounts(self, kinds, closed=False):
         acc = [a for a in self.ledger.balances() if a["kind"] in kinds and not a["archived"]]
-        text = "Hisoblar\n" + "\n".join(f"{a['name']}: {money(a['balance'], a['currency'])}" for a in acc)
+        debts = kinds == {"debt_lent", "debt_borrowed"}
+        if debts:
+            acc = [a for a in acc if (a["balance"] == 0 if closed else a["balance"] > 0)]
+        title = ("Yopilgan qarzlar" if closed else "Ochiq qarzlar") if debts else "Hisoblar"
+        text = (
+            title
+            + "\n"
+            + (
+                "\n".join(f"{a['name']}: {money(a['balance'], a['currency'])}" for a in acc)
+                or "Hozircha yo‘q."
+            )
+        )
+        extra = (
+            [[("Ochiq qarzlar", "m:debts") if closed else ("Yopilgan qarzlar", "m:debts_closed")]]
+            if debts
+            else []
+        )
         return [
             Reply(
                 text or "Hisob yo‘q.",
                 rows([(a["name"], f"a:{a['id']}") for a in acc])
+                + extra
                 + [[("Hisob qo‘shish", "m:newaccount"), ("Menyu", "m:menu")]],
             )
         ]
@@ -539,14 +655,20 @@ class Engine:
     def account_detail(self, aid):
         a = self.ledger.account(aid)
         buttons = [("Boshlang‘ich qoldiqni tuzatish", f"opening:{aid}")]
+        status = ""
         if a["kind"] == "investment":
             buttons.append(("Joriy qiymatni kiritish", f"value:{aid}"))
         if a["kind"].startswith("debt_"):
+            remaining = self.ledger.balance(aid)
+            status = "\nHolat: " + ("Yopilgan — tarix saqlanadi" if remaining == 0 else "Ochiq")
+            if remaining > 0 and not a["archived"]:
+                label = "Qaytarilgan pulni kiritish" if a["kind"] == "debt_lent" else "Qarzni qaytarish"
+                buttons.insert(0, (label, f"repay:{aid}"))
             buttons.append(("Muddatni belgilash", f"due:{aid}"))
         buttons.append(("Arxivlash", f"archive:{aid}"))
         return [
             Reply(
-                f"{a['name']} • {ACCOUNT_LABELS[a['kind']]}\nQoldiq: {money(self.ledger.balance(aid), a['currency'])}\nBoshlang‘ich: {money(a['opening'], a['currency'])} / {a['opened_on']}\nMuddat: {a['due'] or '—'}",
+                f"{a['name']} • {ACCOUNT_LABELS[a['kind']]}\nQoldiq: {money(self.ledger.balance(aid), a['currency'])}\nBoshlang‘ich: {money(a['opening'], a['currency'])} / {a['opened_on']}\nMuddat: {a['due'] or '—'}{status}",
                 rows(buttons) + [[("Menyu", "m:menu")]],
             )
         ]
@@ -583,6 +705,8 @@ class Engine:
             return self.accounts(LIQUID)
         if name == "debts":
             return self.accounts({"debt_lent", "debt_borrowed"})
+        if name == "debts_closed":
+            return self.accounts({"debt_lent", "debt_borrowed"}, closed=True)
         if name == "investments":
             return self.accounts({"investment"})
         if name in {"newaccount", "add"}:

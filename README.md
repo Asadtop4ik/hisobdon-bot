@@ -70,3 +70,9 @@ Deploy/migratsiyadan oldin yangi backup oling. Kod rollbacki oldingi image SHA b
 - `runtime.py`: owner tekshiruvi, durable inbox/outbox, aiogram polling.
 
 Tasdiqlangan umumiy dizayn va bajarish rejasi `docs/superpowers/` ichida. Shaxsiy boshlang‘ich ma’lumotlar hujjatlarda bo‘lmaydi.
+
+## Qarzning bir qismini yoki hammasini qaytarish
+
+`/debts` orqali qarzni oching. **Qaytarilgan pulni kiritish** (siz bergan qarz) yoki **Qarzni qaytarish** (siz olgan qarz) tugmasini bosing. **To‘liq** qolgan summani oladi; **Qisman qaytarish** summani kiritishni so‘raydi. Keyin pul tushgan yoki pul ketgan karta/naqd hisobni tanlab saqlang.
+
+Kirim kategoriya oynasida **Qarz qaytdi**, chiqim oynasida **Qarzni qaytardim** yo‘li ham bor. Bu oddiy daromad/xarajat emas: pul hisobini va tegishli qarz qoldig‘ini birga yangilaydi. Qoldiq 0 bo‘lganda qarz **Yopilgan qarzlar** ro‘yxatida qoladi; tarix o‘chirilmaydi. Qaytarishni bekor qilsangiz, qarz qayta ochiladi.

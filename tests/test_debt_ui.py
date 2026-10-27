@@ -98,3 +98,28 @@ def test_stale_full_payment_cannot_overpay_or_double_post(tmp_path):
     replies, _ = click(engine, replies, "Saqlash")
     assert ledger.balance(debt) == 9000000 and ledger.balance(card) == 21000000
     assert len(store.all("SELECT * FROM operations")) == 1
+
+
+def test_full_repayment_amount_can_be_corrected_and_account_changed(tmp_path):
+    _, ledger, engine, card, cash, debt = setup(tmp_path)
+    replies = engine.callback(f"a:{debt}", NOW)
+    replies, _ = click(engine, replies, "Qaytarilgan pulni kiritish")
+    replies, _ = click(engine, replies, "To‘liq")
+    replies, _ = click(engine, replies, "Karta")
+    replies, _ = click(engine, replies, "Saqlash")
+    replies, _ = click(engine, replies, "Tuzatish")
+    replies, _ = click(engine, replies, "Hisob")
+    replies, _ = click(engine, replies, "Naqd")
+    replies, _ = click(engine, replies, "O‘zgarishni saqlash")
+    assert ledger.balance(card) == 20000000 and ledger.balance(cash) == 10000000
+    replies, _ = click(engine, replies, "Tuzatish")
+    replies, _ = click(engine, replies, "Summa")
+    replies, _ = click(engine, replies, "Qisman")
+    replies = engine.message("40000", 1, NOW)
+    replies, _ = click(engine, replies, "O‘zgarishni saqlash")
+    assert ledger.balance(debt) == 6000000 and ledger.balance(cash) == 4000000
+    replies, _ = click(engine, replies, "Tuzatish")
+    replies, _ = click(engine, replies, "Summa")
+    replies, _ = click(engine, replies, "To‘liq")
+    replies, _ = click(engine, replies, "O‘zgarishni saqlash")
+    assert ledger.balance(debt) == 0 and ledger.balance(cash) == 10000000

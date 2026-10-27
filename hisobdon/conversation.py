@@ -278,7 +278,7 @@ class Engine:
                 d["editing"] = False
                 return self.save_operation(did, d)
             data.pop(value, None)
-            if value == "account":
+            if value == "account" and data.get("kind") not in {"repay_lent", "repay_borrowed"}:
                 data.pop("target", None)
             if value == "note":
                 return self.ask(did, d, "note", "Yangi izohni yozing:", input_type="text")
@@ -393,6 +393,16 @@ class Engine:
                 if kind in {"repay_lent", "repay_borrowed"} and data.get("target"):
                     debt = self.ledger.account(data["target"])
                     balance = self.ledger.balance(debt["id"])
+                    if data.get("replaces"):
+                        original = self.s.one(
+                            "SELECT * FROM operations WHERE id=? AND status='active'", (data["replaces"],)
+                        )
+                        if (
+                            original
+                            and original["kind"] == kind
+                            and json.loads(original["payload"]).get("target") == debt["id"]
+                        ):
+                            balance += original["amount"]
                     if balance <= 0:
                         return [
                             Reply("Bu qarz yopilgan. Yangi qaytarish yozilmaydi.", [[("Qarzlar", "m:debts")]])

@@ -229,3 +229,5 @@ exports/
 *.db
 .superpowers/
 .ruff_cache/
+
+.DS_Store

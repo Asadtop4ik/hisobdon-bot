@@ -10,7 +10,7 @@ def utcnow():
     return datetime.now(timezone.utc).isoformat()
 
 
-SCHEMA = '''
+SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS accounts(
  id INTEGER PRIMARY KEY, name TEXT NOT NULL, currency TEXT NOT NULL CHECK(currency IN ('UZS','USD')),
@@ -45,11 +45,23 @@ CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY, kind TEXT NOT NULL, start T
 CREATE TABLE IF NOT EXISTS updates(id INTEGER PRIMARY KEY, payload TEXT NOT NULL,
  status TEXT NOT NULL DEFAULT 'pending', created_at TEXT NOT NULL);
 PRAGMA user_version=1;
-'''
+"""
 
-EXPENSE_CATEGORIES = ['Ovqat', 'Oziq-ovqat', 'Transport', 'Uy', 'Kommunal', 'Aloqa', 'Sog‘liq',
-                      'Xarid', 'Ta’lim', 'Ko‘ngilochar', 'Komissiya', 'Boshqa']
-INCOME_CATEGORIES = ['Ish haqi', 'Xizmat / biznes', 'Sovg‘a', 'Boshqa kirim', 'Investitsiya daromadi', 'Foiz']
+EXPENSE_CATEGORIES = [
+    "Ovqat",
+    "Oziq-ovqat",
+    "Transport",
+    "Uy",
+    "Kommunal",
+    "Aloqa",
+    "Sog‘liq",
+    "Xarid",
+    "Ta’lim",
+    "Ko‘ngilochar",
+    "Komissiya",
+    "Boshqa",
+]
+INCOME_CATEGORIES = ["Ish haqi", "Xizmat / biznes", "Sovg‘a", "Boshqa kirim", "Investitsiya daromadi", "Foiz"]
 
 
 class Store:
@@ -58,14 +70,15 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(path), isolation_level=None, timeout=15)
         self.conn.row_factory = sqlite3.Row
-        self.conn.execute('PRAGMA journal_mode=WAL')
-        self.conn.execute('PRAGMA foreign_keys=ON')
-        self.conn.execute('PRAGMA synchronous=FULL')
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA foreign_keys=ON")
+        self.conn.execute("PRAGMA synchronous=FULL")
         self.conn.executescript(SCHEMA)
         with self.transaction():
-            self.conn.executemany('INSERT OR IGNORE INTO categories VALUES (?,?)',
-                                 [(c, 'expense') for c in EXPENSE_CATEGORIES] +
-                                 [(c, 'income') for c in INCOME_CATEGORIES])
+            self.conn.executemany(
+                "INSERT OR IGNORE INTO categories VALUES (?,?)",
+                [(c, "expense") for c in EXPENSE_CATEGORIES] + [(c, "income") for c in INCOME_CATEGORIES],
+            )
 
     def close(self):
         self.conn.close()
@@ -73,17 +86,17 @@ class Store:
     @contextmanager
     def transaction(self):
         if self.conn.in_transaction:
-            name = 'sp_' + uuid.uuid4().hex
-            self.conn.execute(f'SAVEPOINT {name}')
+            name = "sp_" + uuid.uuid4().hex
+            self.conn.execute(f"SAVEPOINT {name}")
             try:
                 yield
-                self.conn.execute(f'RELEASE {name}')
+                self.conn.execute(f"RELEASE {name}")
             except BaseException:
-                self.conn.execute(f'ROLLBACK TO {name}')
-                self.conn.execute(f'RELEASE {name}')
+                self.conn.execute(f"ROLLBACK TO {name}")
+                self.conn.execute(f"RELEASE {name}")
                 raise
             return
-        self.conn.execute('BEGIN IMMEDIATE')
+        self.conn.execute("BEGIN IMMEDIATE")
         try:
             yield
             self.conn.commit()
@@ -99,29 +112,39 @@ class Store:
         return dict(row) if row else None
 
     def get(self, key, default=None):
-        row = self.one('SELECT value FROM settings WHERE key=?', (key,))
-        return json.loads(row['value']) if row else default
+        row = self.one("SELECT value FROM settings WHERE key=?", (key,))
+        return json.loads(row["value"]) if row else default
 
     def set(self, key, value):
-        self.conn.execute('INSERT INTO settings VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',
-                          (key, json.dumps(value, ensure_ascii=False)))
+        self.conn.execute(
+            "INSERT INTO settings VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, json.dumps(value, ensure_ascii=False)),
+        )
 
     def record_message(self, chat_id, message_id, text, at):
-        self.conn.execute('INSERT OR IGNORE INTO messages(chat_id,telegram_id,text,received_at) VALUES (?,?,?,?)',
-                          (chat_id, message_id, text, at))
-        return self.one('SELECT id FROM messages WHERE chat_id=? AND telegram_id=?', (chat_id, message_id))['id']
+        self.conn.execute(
+            "INSERT OR IGNORE INTO messages(chat_id,telegram_id,text,received_at) VALUES (?,?,?,?)",
+            (chat_id, message_id, text, at),
+        )
+        return self.one("SELECT id FROM messages WHERE chat_id=? AND telegram_id=?", (chat_id, message_id))[
+            "id"
+        ]
 
     def save_draft(self, draft_id, data):
-        self.conn.execute('INSERT INTO drafts VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at',
-                          (draft_id, json.dumps(data, ensure_ascii=False), utcnow()))
+        self.conn.execute(
+            "INSERT INTO drafts VALUES (?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at",
+            (draft_id, json.dumps(data, ensure_ascii=False), utcnow()),
+        )
 
     def draft(self, draft_id):
-        row = self.one('SELECT data FROM drafts WHERE id=?', (draft_id,))
-        return json.loads(row['data']) if row else None
+        row = self.one("SELECT data FROM drafts WHERE id=?", (draft_id,))
+        return json.loads(row["data"]) if row else None
 
     def audit(self, action, object_id, detail):
-        self.conn.execute('INSERT INTO audit(action,object_id,detail,created_at) VALUES (?,?,?,?)',
-                          (action, object_id, json.dumps(detail, ensure_ascii=False), utcnow()))
+        self.conn.execute(
+            "INSERT INTO audit(action,object_id,detail,created_at) VALUES (?,?,?,?)",
+            (action, object_id, json.dumps(detail, ensure_ascii=False), utcnow()),
+        )
 
     def snapshot(self, destination):
         target = sqlite3.connect(str(destination))

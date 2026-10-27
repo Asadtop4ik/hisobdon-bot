@@ -3,7 +3,12 @@ name = "hisobdon-bot"
 version = "1.0.0"
 description = "Owner-only Uzbek personal finance Telegram bot"
 requires-python = ">=3.12"
-dependencies = ["aiogram>=3.20,<4", "openpyxl>=3.1,<4", "cryptography>=44"]
+dependencies = [
+    "aiogram>=3.20,<4",
+    "openpyxl>=3.1,<4",
+    "cryptography>=44",
+    "tzdata>=2025",
+]
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.11"]

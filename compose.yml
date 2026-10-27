@@ -1,0 +1,28 @@
+name: hisobdon
+services:
+  bot:
+    image: hisobdon:${RELEASE_SHA:?Set RELEASE_SHA to the deployed commit}
+    restart: unless-stopped
+    init: true
+    env_file:
+      - ./runtime.env
+    environment:
+      DATA_DIR: /data
+      APP_VERSION: ${RELEASE_SHA}
+    volumes:
+      - ./data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 768m
+    cpus: 1.0
+    stop_grace_period: 40s
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '3'

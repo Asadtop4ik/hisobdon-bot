@@ -1,0 +1,8 @@
+*
+!hisobdon/
+!hisobdon/**
+!tests/
+!tests/**
+!requirements.txt
+!requirements-dev.txt
+!pyproject.toml

@@ -37,6 +37,7 @@ def parse(text, now):
     result = {"date": day.isoformat(), "note": text}
     dates = re.findall(r"\b\d{4}-\d{2}-\d{2}\b", t)
     relative = set(re.findall(r"\b(bugun|kecha|ertaga|indinga)\b", t))
+    result["date_explicit"] = bool(dates or relative)
     if len(relative) > 1 or (dates and relative):
         return {**result, "error": "Bir nechta sana ko‘rsatildi. Bitta aniq sanani yozing."}
     if relative & {"ertaga", "indinga"}:

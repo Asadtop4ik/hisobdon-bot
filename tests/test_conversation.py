@@ -54,6 +54,7 @@ def test_unknown_input_requires_type_and_category(tmp_path):
     Ledger(s).create_account("Naqd", "UZS", 10000000, "2026-10-01")
     replies = e.message("40000", 1, NOW)
     replies, _ = pick(e, replies, "Chiqim")
+    replies, _ = pick(e, replies, "Bugun")
     replies, _ = pick(e, replies, "Ovqat")
     replies, _ = pick(e, replies, "Naqd")
     assert Ledger(s).balances()[0]["balance"] == 6000000

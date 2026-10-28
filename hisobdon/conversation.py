@@ -3,7 +3,7 @@
 import json
 import secrets
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from .ledger import Ledger, RuleError, LIQUID, INCOME, valid_day
 from .money import money
 from .parser import parse, parse_amount
@@ -87,6 +87,15 @@ class Engine:
         return did
 
     def ask(self, did, d, step, text, options=(), input_type=None):
+        if d["mode"] == "operation" and step in {
+            "account",
+            "category",
+            "split_account",
+            "split_amount",
+            "confirm",
+            "negative",
+        }:
+            options = list(options) + [("Sanani o‘zgartirish", {"action": "change_date"})]
         d.update(step=step, rev=d.get("rev", 0) + 1, input=input_type)
         d["options"] = {str(i): val for i, (_, val) in enumerate(options)}
         self.s.save_draft(did, d)
@@ -152,7 +161,10 @@ class Engine:
                     cat = self.s.one("SELECT kind FROM categories WHERE name=?", (alias["category"],))
                     if cat:
                         parsed.update(category=alias["category"], kind=cat["kind"])
-        did = self.new({"mode": "operation", "data": {**parsed, "message_id": mid}})
+        confirmed = parsed.pop("date_explicit", False)
+        did = self.new(
+            {"mode": "operation", "date_confirmed": confirmed, "data": {**parsed, "message_id": mid}}
+        )
         return self.advance(did, self.s.draft(did), now)
 
     @staticmethod
@@ -163,7 +175,12 @@ class Engine:
                 raise ValueError("Musbat summa kiriting (qoldiq/komissiya uchun 0 mumkin).")
             return amount
         if kind in {"date", "due"}:
-            day = date.fromisoformat(text).isoformat()
+            try:
+                day = (
+                    datetime.strptime(text, "%d.%m.%Y").date() if "." in text else date.fromisoformat(text)
+                ).isoformat()
+            except ValueError:
+                raise ValueError("Sanani YYYY-MM-DD yoki DD.MM.YYYY shaklida kiriting.") from None
             if kind == "date":
                 valid_day(day)
             return day
@@ -268,6 +285,18 @@ class Engine:
     def accept(self, did, d, value, now):
         step = d["step"]
         data = d.setdefault("data", {})
+        if isinstance(value, dict) and value.get("action") == "change_date":
+            data.pop("date", None)
+            d["date_confirmed"] = False
+            return self.date_prompt(did, d, now)
+        if (
+            step in {"confirm", "negative"}
+            and d["mode"] == "operation"
+            and data.get("kind") == "expense"
+            and not data.get("replaces")
+            and not d.get("date_confirmed")
+        ):
+            return self.date_prompt(did, d, now)
         if (
             step == "account"
             and isinstance(value, dict)
@@ -329,7 +358,7 @@ class Engine:
                 did,
                 d,
                 step,
-                "Sanani YYYY-MM-DD shaklida yozing:",
+                "Sanani YYYY-MM-DD yoki DD.MM.YYYY shaklida yozing:",
                 input_type="due" if step == "due" else "date",
             )
         if step == "category" and value == "new":
@@ -349,6 +378,8 @@ class Engine:
             return self.save_operation(did, d)
         else:
             data[step] = value
+            if step == "date":
+                d["date_confirmed"] = True
         d.pop("step", None)
         self.s.save_draft(did, d)
         return self.advance(did, d, now)
@@ -460,18 +491,10 @@ class Engine:
                 return self.ask(
                     did, d, "amount", "Summani yozing (masalan: 40000 yoki 12.50):", input_type="amount"
                 )
-            if not data.get("date"):
-                return self.ask(
-                    did,
-                    d,
-                    "date",
-                    "Operatsiya sanasi:",
-                    [
-                        ("Bugun", today),
-                        ("Kecha", (now.date() - timedelta(days=1)).isoformat()),
-                        ("Boshqa sana", "custom"),
-                    ],
-                )
+            if not data.get("date") or (
+                kind == "expense" and not data.get("replaces") and not d.get("date_confirmed")
+            ):
+                return self.date_prompt(did, d, now)
             if kind in {"income", "expense"} and not data.get("category"):
                 cats = self.s.all("SELECT name FROM categories WHERE kind=? ORDER BY rowid", (kind,))
                 repayment = (
@@ -590,6 +613,22 @@ class Engine:
                 )
             return self.save_operation(did, d)
         return self.menu()
+
+    def date_prompt(self, did, d, now):
+        return self.ask(
+            did,
+            d,
+            "date",
+            "Operatsiya sanasini tanlang:",
+            [
+                (f"Bugun — {now.date().isoformat()}", now.date().isoformat()),
+                (
+                    f"Kecha — {(now.date() - timedelta(days=1)).isoformat()}",
+                    (now.date() - timedelta(days=1)).isoformat(),
+                ),
+                ("Boshqa sana", "custom"),
+            ],
+        )
 
     def advance_split(self, did, d):
         data = d["data"]

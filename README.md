@@ -96,3 +96,7 @@ Joriy holat bilan davr oxiri ajratilgan. `manifest.json` satrlar soni va fayl ha
 Texnik inbox/outbox, scheduler holati, server maxfiy sozlamalari va Telegram marshrutlash ID’lari AI paketiga kirmaydi. Asl foydalanuvchi matnlari o‘z holicha kiradi. To‘liq moliyaviy arxiv tiklash uchun SQLite backup o‘rnini bosmaydi.
 
 Reserve migration: DB schema v2 adds `is_reserve`, preserves existing balances, and refuses unknown newer versions. Before upgrading, take an encrypted backup. After reserve accounts exist, do not roll back to pre-reserve code that ignores their purpose; restore a reviewed pre-upgrade backup only with awareness of later-record loss, or fix forward.
+
+## Xarajat sanasini tanlash
+
+Sana yozilmagan xarajatda bot **Bugun / Kecha / Boshqa sana** deb so‘raydi. Matnda aniq sana yoki «bugun/kecha» bo‘lsa, o‘sha sana saqlanadi. Hisob/kategoriya tanlash va tasdiqlash oynasidagi **Sanani o‘zgartirish** orqali qoralamani qayta yozmasdan sanani almashtiring. Boshqa sana `YYYY-MM-DD` yoki `DD.MM.YYYY` shaklida kiritiladi; kelajak sanasi qabul qilinmaydi.

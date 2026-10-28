@@ -52,6 +52,7 @@ def test_backdated_wizard_and_revision_include_all_source_answers(tmp_path):
     ledger.create_account("Cash", "UZS", 10000000, "2026-09-01")
     engine.callback("op:expense", NOW)
     replies = engine.message("40000", 1, NOW)
+    replies = pick(engine, replies, "Bugun")
     replies = pick(engine, replies, "Ovqat")
     replies = pick(engine, replies, "Cash")
     replies = pick(engine, replies, "Tuzatish")

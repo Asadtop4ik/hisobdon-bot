@@ -77,6 +77,7 @@ def test_reserve_creation_and_existing_account_marker_ui(tmp_path):
     assert Ledger(s).account(1)["is_reserve"] == 1
     Ledger(s).create_account("Oddiy", "USD", 5000, "2026-10-01")
     replies = e.message("ovqat 10 dollar", 4, NOW)
+    replies = click(e, replies, "Bugun")
     labels = [label for reply in replies for row in reply.rows for label, _ in row]
     assert not any("Uy zaxirasi" in label for label in labels)
     assert any("Oddiy" in label for label in labels)

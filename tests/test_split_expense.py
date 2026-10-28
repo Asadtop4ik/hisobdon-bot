@@ -65,6 +65,7 @@ def test_split_validation_is_atomic_and_currency_and_reserve_safe(tmp_path):
 def test_split_payment_ui_survives_restart_and_edit(tmp_path):
     s, ledger, e, cash, card = setup(tmp_path)
     replies = e.message("ovqat 60 ming som", 1, NOW)
+    replies, _ = click(e, replies, "Bugun")
     replies, _ = click(e, replies, "Bo‘lib to‘lash")
     replies, _ = click(e, replies, "Naqd")
     replies = e.message("17000", 2, NOW)

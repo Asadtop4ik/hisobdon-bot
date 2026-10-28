@@ -53,8 +53,16 @@ def test_durable_update_replay_does_not_duplicate_drafts(tmp_path):
         },
     }
     cache_updates(s, [cb], 100)
+    account_replies = apply_update(s, cb, 100, NOW)
     apply_update(s, cb, 100, NOW)
-    apply_update(s, cb, 100, NOW)
+    assert ledger.balances()[0]["balance"] == 10000000
+    account_callback = next(
+        data for row in account_replies[0]["rows"] for label, data in row if "Cash" in label
+    )
+    cb3 = {"update_id": 3, "callback_query": {**cb["callback_query"], "id": "q3", "data": account_callback}}
+    cache_updates(s, [cb3], 100)
+    apply_update(s, cb3, 100, NOW)
+    apply_update(s, cb3, 100, NOW)
     assert ledger.balances()[0]["balance"] == 6000000
 
 

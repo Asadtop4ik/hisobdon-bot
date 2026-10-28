@@ -100,3 +100,7 @@ Reserve migration: DB schema v2 adds `is_reserve`, preserves existing balances, 
 ## Xarajat sanasini tanlash
 
 Sana yozilmagan xarajatda bot **Bugun / Kecha / Boshqa sana** deb so‘raydi. Matnda aniq sana yoki «bugun/kecha» bo‘lsa, o‘sha sana saqlanadi. Hisob/kategoriya tanlash va tasdiqlash oynasidagi **Sanani o‘zgartirish** orqali qoralamani qayta yozmasdan sanani almashtiring. Boshqa sana `YYYY-MM-DD` yoki `DD.MM.YYYY` shaklida kiritiladi; kelajak sanasi qabul qilinmaydi.
+
+## To‘liq nom va qoldiqlar
+
+Hisob/qarz/investitsiya tanlovlari bitta ustunda ko‘rsatiladi. To‘liq nom va qoldiq xabar matnida ham raqamlangan ro‘yxat sifatida beriladi; tugma raqami shu ro‘yxatga mos. Telegram ekraniga juda uzun tugma sig‘masa, to‘liq qiymatni yuqoridagi xabardan o‘qing. Uzoq kategoriya nomlari ham xabar matnida ko‘rsatiladi.

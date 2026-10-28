@@ -49,7 +49,7 @@ class Reply:
     export_range: tuple | None = None
 
 
-def rows(options, n=2):
+def rows(options, n=1):
     return [options[i : i + n] for i in range(0, len(options), n)]
 
 
@@ -87,6 +87,15 @@ class Engine:
         return did
 
     def ask(self, did, d, step, text, options=(), input_type=None):
+        options = list(options)
+        show_details = step in {"account", "target", "split_account"} or any(
+            len(label) > 32 for label, _ in options
+        )
+        if show_details and options:
+            text += "\n\nTo‘liq tanlovlar:\n" + "\n".join(
+                f"{i + 1}. {label}" for i, (label, _) in enumerate(options)
+            )
+            options = [(f"{i + 1}. {label}", value) for i, (label, value) in enumerate(options)]
         if d["mode"] == "operation" and step in {
             "account",
             "category",
@@ -104,7 +113,9 @@ class Engine:
         elif self.s.get("active_input") == did:
             self.s.set("active_input", None)
         buttons = [(label, f"d:{did}:{d['rev']}:{i}") for i, (label, _) in enumerate(options)]
-        return [Reply(text, rows(buttons) + [[("Qoralamani bekor qilish", f"z:{did}"), ("Menyu", "m:menu")]])]
+        return [
+            Reply(text, rows(buttons) + [[("Qoralamani bekor qilish", f"z:{did}")], [("Menyu", "m:menu")]])
+        ]
 
     def message(self, text, message_id, now):
         mid = self.s.record_message(self.owner_id, message_id, text, now.isoformat())
@@ -590,7 +601,8 @@ class Engine:
                     d,
                     "target",
                     "Daromad qayerda qoladi?",
-                    [("Investitsiya ichida", 0)] + [(b["name"], b["id"]) for b in accounts],
+                    [(f"Investitsiya ichida · {money(self.ledger.balance(a['id']), a['currency'])}", 0)]
+                    + [(f"{b['name']} · {money(b['balance'], b['currency'])}", b["id"]) for b in accounts],
                 )
             if kind == "exchange" and not data.get("received"):
                 currency = self.ledger.account(data["target"])["currency"]
@@ -782,7 +794,10 @@ class Engine:
             title
             + "\n"
             + (
-                "\n".join(f"{a['name']}: {money(a['balance'], a['currency'])}" for a in acc)
+                "\n\n".join(
+                    f"{i + 1}. {a['name']}\nQoldiq: {money(a['balance'], a['currency'])}"
+                    for i, a in enumerate(acc)
+                )
                 or "Hozircha yo‘q."
             )
         )
@@ -794,7 +809,12 @@ class Engine:
         return [
             Reply(
                 text or "Hisob yo‘q.",
-                rows([(a["name"], f"a:{a['id']}") for a in acc])
+                rows(
+                    [
+                        (f"{i + 1}. {a['name']} · {money(a['balance'], a['currency'])}", f"a:{a['id']}")
+                        for i, a in enumerate(acc)
+                    ]
+                )
                 + extra
                 + [[("Hisob qo‘shish", "m:newaccount"), ("Menyu", "m:menu")]],
             )

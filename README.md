@@ -104,3 +104,11 @@ Sana yozilmagan xarajatda bot **Bugun / Kecha / Boshqa sana** deb so‘raydi. Ma
 ## To‘liq nom va qoldiqlar
 
 Hisob/qarz/investitsiya tanlovlari bitta ustunda ko‘rsatiladi. To‘liq nom va qoldiq xabar matnida ham raqamlangan ro‘yxat sifatida beriladi; tugma raqami shu ro‘yxatga mos. Telegram ekraniga juda uzun tugma sig‘masa, to‘liq qiymatni yuqoridagi xabardan o‘qing. Uzoq kategoriya nomlari ham xabar matnida ko‘rsatiladi.
+
+## Qarz olish/berishning sodda yo‘li
+
+`20000 qarz oldim` yoki `20000 qarz berdim` deb yozing. Pul tushgan/ketgan karta yoki naqd hisobni tanlang, keyin odamning ismini yozing. Saqlaganda shu hisob qoldig‘i va Qarzlar bo‘limi birga yangilanadi. Qarzni oldindan alohida hisob sifatida ochish shart emas. Mavjud odamga tegishli qarzni ham tanlash mumkin. Ism kiritib, saqlamasdan bekor qilingan qoralama bo‘sh qarz yaratmaydi.
+
+Hisob oynasida **Pul o‘tkazish**, **Valyuta almashtirish** va **Hisob harakatlari** bor. Harakatlar tarixida manba va qabul qiluvchi hisob ko‘rinadi.
+
+**Hisobni o‘chirish** qoldiqni ko‘rsatib tasdiqlash so‘raydi. Tasdiqlansa, hisob o‘z qoldig‘i bilan joriy jami hisobdan chiqariladi; eski operatsiyalar va audit eksportda saqlanadi. Bu xarajat yoki qarzni qaytarish emas. O‘chirilgan hisobni tarixdan qayta tiklash uchun bu tugmani ishlatmang: yangi operatsiyalar uchun faol hisobni tanlang. Agar tasdiqlash paytida qoldiq o‘zgarsa, qayta tasdiqlash kerak.

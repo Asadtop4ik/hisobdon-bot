@@ -90,6 +90,10 @@ def parse(text, now):
     if re.search(r"\b(qarz|investitsiya|invest|o‘tkazma|almashtir)\w*", t):
         result.pop("kind", None)
         result.pop("category", None)
+        if re.search(r"\bqarz\s+(oldim|olganman|olyapman)\b", t):
+            result["kind"] = "borrow"
+        elif re.search(r"\bqarz\s+(berdim|berganman|beryapman)\b", t):
+            result["kind"] = "lend"
     elif re.search(r"\b(kirim|daromad|tushdi|topdim)\b", t) or text.lstrip().startswith("+"):
         result["kind"] = "income"
         if result.get("category") not in INCOME_CATS:

@@ -254,6 +254,44 @@ class Engine:
                 return self.edit_menu(did, self.s.draft(did))
             if cmd == "a":
                 return self.account_detail(int(parts[1]))
+            if cmd == "delete":
+                account = self.ledger.account(int(parts[1]))
+                if account["archived"] == 2:
+                    return [Reply("Hisob o‘chirilgan.", [[("Hisoblar", "m:accounts")]])]
+                balance = self.ledger.balance(account["id"])
+                did = self.new(
+                    {"mode": "delete_account", "account": account["id"], "data": {"balance": balance}}
+                )
+                return self.ask(
+                    did,
+                    self.s.draft(did),
+                    "confirm",
+                    f"{account['name']}\nQoldiq: {money(balance, account['currency'])}\nHisob va qoldig‘i jami hisobdan chiqariladi. Eski operatsiyalar tarixi saqlanadi. Tasdiqlaysizmi?",
+                    [("Ha, hisobni o‘chirish", "save")],
+                )
+            if cmd == "move":
+                account = self.ledger.account(int(parts[1]))
+                kind = parts[2]
+                if (
+                    kind not in {"transfer", "exchange"}
+                    or account["kind"] not in LIQUID
+                    or account["archived"]
+                ):
+                    raise RuleError("Faol karta yoki naqd hisobni tanlang.")
+                did = self.new(
+                    {
+                        "mode": "operation",
+                        "data": {
+                            "kind": kind,
+                            "account": account["id"],
+                            "currency": account["currency"],
+                            "date": now.date().isoformat(),
+                        },
+                    }
+                )
+                return self.advance(did, self.s.draft(did), now)
+            if cmd == "ah":
+                return self.history(int(parts[2]) if len(parts) > 2 else 0, int(parts[1]))
             if cmd == "reserve":
                 if parts[2] not in {"0", "1"}:
                     raise RuleError("Zaxira belgisi noto‘g‘ri.")
@@ -280,12 +318,16 @@ class Engine:
                 return self.advance(did, self.s.draft(did), now)
             if cmd == "archive":
                 a = self.ledger.account(int(parts[1]))
+                if a["archived"] == 2:
+                    return self.account_detail(a["id"])
                 if self.ledger.balance(a["id"]) != 0:
                     raise RuleError("Arxivlash uchun qoldiq 0 bo‘lsin.")
                 self.s.conn.execute("UPDATE accounts SET archived=1 WHERE id=?", (a["id"],))
                 self.s.audit("archive", a["id"], {})
                 return [Reply("Hisob arxivlandi.", [[("Hisoblar", "m:accounts")]])]
             if cmd in {"opening", "value", "due"}:
+                if self.ledger.account(int(parts[1]))["archived"] == 2:
+                    return self.account_detail(int(parts[1]))
                 did = self.new({"mode": cmd, "account": int(parts[1]), "data": {}})
                 return self.advance(did, self.s.draft(did), now)
             if cmd == "op":
@@ -300,6 +342,17 @@ class Engine:
     def accept(self, did, d, value, now):
         step = d["step"]
         data = d.setdefault("data", {})
+        if step == "loan_person":
+            if value == "new":
+                return self.ask(did, d, "loan_person", "Odamning ismini yozing:", input_type="name")
+            if type(value) is int:
+                data["target"] = value
+            else:
+                name = str(value).strip()
+                if not name or len(name) > 80:
+                    raise RuleError("Ism 1–80 belgi bo‘lsin.")
+                data["counterparty"] = name
+            return self.advance(did, d, now)
         if isinstance(value, dict) and value.get("action") == "change_date":
             data.pop("date", None)
             d["date_confirmed"] = False
@@ -562,7 +615,27 @@ class Engine:
                 )
             a = self.ledger.account(data["account"])
             data["currency"] = a["currency"]
-            if kind in {"transfer", "exchange", *ENTITY} and not data.get("target"):
+            if kind in {"borrow", "lend"} and not data.get("target") and not data.get("counterparty"):
+                debts = [
+                    b
+                    for b in self.ledger.balances()
+                    if not b["archived"] and b["kind"] == ENTITY[kind] and b["currency"] == a["currency"]
+                ]
+                question = "Kimdan qarz oldingiz?" if kind == "borrow" else "Kimga qarz berdingiz?"
+                return self.ask(
+                    did,
+                    d,
+                    "loan_person",
+                    question + " Ismini yozing yoki mavjud odamni tanlang:",
+                    [(f"{b['name']} · {money(b['balance'], b['currency'])}", b["id"]) for b in debts]
+                    + ([("Boshqa odam", "new")] if debts else []),
+                    input_type="name",
+                )
+            if (
+                kind in {"transfer", "exchange", *ENTITY}
+                and not data.get("target")
+                and not (kind in {"borrow", "lend"} and data.get("counterparty"))
+            ):
                 target_kind = ENTITY.get(kind)
                 accounts = [
                     b
@@ -707,6 +780,8 @@ class Engine:
             text += f"\nTegishli hisob: {b['name']}"
             if data.get("received"):
                 text += f" · {money(data['received'], b['currency'])}"
+        elif data.get("counterparty"):
+            text += "\n" + ("Kimdan: " if data["kind"] == "borrow" else "Kimga: ") + data["counterparty"]
         if data.get("category"):
             text += f"\nKategoriya: {data['category']}"
         if data.get("allocations"):
@@ -723,10 +798,25 @@ class Engine:
     def save_operation(self, did, d):
         data = d["data"]
         try:
-            if data.get("replaces"):
-                op = self.ledger.replace(data["replaces"], data, "draft:" + did)
-            else:
-                op = self.ledger.post(data, "draft:" + did)
+            with self.s.transaction():
+                posting = dict(data)
+                if (
+                    posting["kind"] in {"borrow", "lend"}
+                    and not posting.get("target")
+                    and posting.get("counterparty")
+                ):
+                    posting["target"] = self.ledger.create_account(
+                        posting["counterparty"],
+                        self.ledger.account(posting["account"])["currency"],
+                        0,
+                        posting["date"],
+                        ENTITY[posting["kind"]],
+                    )
+                if data.get("replaces"):
+                    op = self.ledger.replace(data["replaces"], posting, "draft:" + did)
+                else:
+                    op = self.ledger.post(posting, "draft:" + did)
+            data.update(posting)
         except RuleError as exc:
             if str(exc).startswith("Qoldiq yetarli emas."):
                 return self.ask(did, d, "negative", str(exc), [("Manfiy qoldiqni tasdiqlash", True)])
@@ -744,7 +834,7 @@ class Engine:
                 )
         debt_result = ""
         extra_buttons = []
-        if data["kind"] in {"repay_lent", "repay_borrowed"}:
+        if data["kind"] in {"repay_lent", "repay_borrowed", "borrow", "lend"}:
             debt = self.ledger.account(data["target"])
             remaining = self.ledger.balance(debt["id"])
             debt_result = (
@@ -772,6 +862,15 @@ class Engine:
         data = d["data"]
         mode = d["mode"]
         with self.s.transaction():
+            if mode == "delete_account":
+                self.ledger.delete_account(d["account"], data["balance"], now.date().isoformat())
+                self.done(did, d)
+                return [
+                    Reply(
+                        "Hisob qoldig‘i bilan jami hisobdan chiqarildi. Tarix saqlandi.",
+                        [[("Hisoblar", "m:accounts")]],
+                    )
+                ]
             if mode == "operation":
                 return self.save_operation(did, d)
             if mode == "account":
@@ -826,9 +925,21 @@ class Engine:
 
     def account_detail(self, aid):
         a = self.ledger.account(aid)
+        if a["archived"] == 2:
+            return [
+                Reply("Bu hisob o‘chirilgan. Tarixdagi yozuvlari saqlangan.", [[("Hisoblar", "m:accounts")]])
+            ]
         buttons = [("Boshlang‘ich qoldiqni tuzatish", f"opening:{aid}")]
+        buttons.append(("Hisob harakatlari", f"ah:{aid}"))
         status = ""
         if a["kind"] in LIQUID:
+            if not a["archived"]:
+                buttons.extend(
+                    [
+                        ("Pul o‘tkazish", f"move:{aid}:transfer"),
+                        ("Valyuta almashtirish", f"move:{aid}:exchange"),
+                    ]
+                )
             status = "\nMaqsad: " + (
                 "Zaxira — kundalik sarfga kirmaydi" if a["is_reserve"] else "Kundalik hisob"
             )
@@ -849,6 +960,7 @@ class Engine:
                 buttons.insert(0, (label, f"repay:{aid}"))
             buttons.append(("Muddatni belgilash", f"due:{aid}"))
         buttons.append(("Arxivlash", f"archive:{aid}"))
+        buttons.append(("Hisobni o‘chirish", f"delete:{aid}"))
         return [
             Reply(
                 f"{a['name']} • {ACCOUNT_LABELS[a['kind']]}\nQoldiq: {money(self.ledger.balance(aid), a['currency'])}\nBoshlang‘ich: {money(a['opening'], a['currency'])} / {a['opened_on']}\nMuddat: {a['due'] or '—'}{status}",
@@ -856,8 +968,15 @@ class Engine:
             )
         ]
 
-    def history(self, offset=0):
-        ops = self.s.all("SELECT * FROM operations ORDER BY id DESC LIMIT 8 OFFSET ?", (max(0, offset),))
+    def history(self, offset=0, account_id=None):
+        query = "SELECT * FROM operations"
+        params = []
+        if account_id is not None:
+            query += (
+                " WHERE EXISTS(SELECT 1 FROM movements WHERE operation_id=operations.id AND account_id=?)"
+            )
+            params.append(account_id)
+        ops = self.s.all(query + " ORDER BY id DESC LIMIT 8 OFFSET ?", params + [max(0, offset)])
         replies = []
         for op in ops:
             data = json.loads(op["payload"])
@@ -869,8 +988,12 @@ class Engine:
                     else [],
                 )
             )
+        prefix = f"ah:{account_id}" if account_id is not None else "h"
         replies.append(
-            Reply("Tarix", [[("Keyingi", f"h:{offset + 8}"), ("Boshi", "h:0")], [("Menyu", "m:menu")]])
+            Reply(
+                "Tarix",
+                [[("Keyingi", f"{prefix}:{offset + 8}"), ("Boshi", f"{prefix}:0")], [("Menyu", "m:menu")]],
+            )
         )
         return replies
 

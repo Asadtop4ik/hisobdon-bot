@@ -85,11 +85,32 @@ class Ledger:
         return acc["opening"] + self.store.one(sql, params)["total"]
 
     def balances(self, as_of=None):
+        deletions = {
+            r["object_id"]: json.loads(r["detail"])["day"]
+            for r in self.store.all("SELECT * FROM audit WHERE action='account_delete' ORDER BY id")
+        }
         return [
             {**a, "balance": self.balance(a["id"], as_of)}
             for a in self.store.all("SELECT * FROM accounts ORDER BY id")
-            if not as_of or a["opened_on"] < as_of
+            if (not as_of or a["opened_on"] < as_of)
+            and (a["archived"] != 2 or (as_of and deletions.get(a["id"], "0001-01-01") >= as_of))
         ]
+
+    def delete_account(self, account_id, expected_balance, day):
+        day = valid_day(day)
+        with self.store.transaction():
+            account = self.account(account_id)
+            if account["archived"] == 2:
+                return
+            balance = self.balance(account_id)
+            if balance != expected_balance:
+                raise RuleError("Qoldiq o‘zgargan. Hisobni qayta ochib, o‘chirishni yana tasdiqlang.")
+            self.store.audit(
+                "account_delete",
+                account_id,
+                {"balance": balance, "currency": account["currency"], "day": day},
+            )
+            self.store.conn.execute("UPDATE accounts SET archived=2 WHERE id=?", (account_id,))
 
     def _validate_principals(self):
         # Validate every historical prefix, not just the present balance.

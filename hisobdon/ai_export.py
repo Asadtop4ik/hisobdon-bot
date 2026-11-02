@@ -77,6 +77,7 @@ def financial_snapshot(store, start, end, generated):
         },
         "counting_rules": [
             "Only status=active operations affect balances; cancelled/replaced versions are history, not extra cashflow.",
+            "Account archived=2 means removed from current totals; account_delete audit contains effective day and excluded balance. This is a balance exclusion, not spending or debt repayment. Earlier period-end balances retain the account.",
             "Balance is opening plus signed movements of active operations. Debt_borrowed is subtracted from net worth.",
             "Opening balance, principal transfers, loan principal and investment contributions are not income/expense.",
             "Transfer/exchange fee is an expense in source currency; amounts in different currencies cannot be summed.",

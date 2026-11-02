@@ -321,6 +321,8 @@ class Ledger:
             raise RuleError("Boshlang‘ich qoldiq noto‘g‘ri.")
         with self.store.transaction():
             old = self.account(account_id)
+            if old["archived"] == 2:
+                raise RuleError("O‘chirilgan hisob qoldig‘ini o‘zgartirib bo‘lmaydi.")
             earlier = self.store.one(
                 "SELECT MIN(o.day) AS first FROM movements m JOIN operations o ON o.id=m.operation_id WHERE m.account_id=?",
                 (account_id,),
@@ -335,6 +337,8 @@ class Ledger:
 
     def value(self, account_id, amount, day):
         a = self.account(account_id)
+        if a["archived"] == 2:
+            raise RuleError("Hisob o‘chirilgan.")
         valid_day(day)
         if (
             a["kind"] != "investment"

@@ -414,7 +414,12 @@ class Engine:
                 data["allocations"] = []
                 data.pop("account", None)
                 d.pop("split_account", None)
-            if value == "account" and data.get("kind") not in {"repay_lent", "repay_borrowed"}:
+            if value == "account" and data.get("kind") not in {
+                "repay_lent",
+                "repay_borrowed",
+                "borrow",
+                "lend",
+            }:
                 data.pop("target", None)
             if value == "note":
                 return self.ask(did, d, "note", "Yangi izohni yozing:", input_type="text")
@@ -809,7 +814,9 @@ class Engine:
                         posting["counterparty"],
                         self.ledger.account(posting["account"])["currency"],
                         0,
-                        posting["date"],
+                        self.s.one(
+                            "SELECT MIN(opened_on) AS day FROM accounts WHERE kind IN ('cash','card')"
+                        )["day"],
                         ENTITY[posting["kind"]],
                     )
                 if data.get("replaces"):

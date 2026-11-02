@@ -98,3 +98,59 @@ def test_abandoned_new_loan_does_not_create_phantom_account(tmp_path):
     replies, _ = click(e, replies, "Qoralamani bekor qilish")
     assert len(s.all("SELECT * FROM accounts")) == 1
     assert not s.all("SELECT * FROM operations")
+
+
+def test_borrowed_cash_account_correction_keeps_same_debt_after_repayment(tmp_path):
+    s = Store(tmp_path / "db")
+    ledger = Ledger(s)
+    e = Engine(s)
+    a = ledger.create_account("First", "UZS", 10000000, "2026-10-01")
+    b = ledger.create_account("Second", "UZS", 0, "2026-10-01")
+    replies = e.message("20000 qarz oldim", 1, NOW)
+    replies, _ = click(e, replies, "First")
+    replies = e.message("Person", 2, NOW)
+    replies, _ = click(e, replies, "Saqlash")
+    original = s.one("SELECT id FROM operations")["id"]
+    debt = s.one("SELECT id FROM accounts WHERE kind='debt_borrowed'")["id"]
+    ledger.post(
+        dict(kind="repay_borrowed", account=a, target=debt, amount=1000000, date="2026-11-02"), "repay"
+    )
+    replies = e.callback(f"e:{original}", NOW)
+    replies, _ = click(e, replies, "Hisob")
+    replies, _ = click(e, replies, "Second")
+    replies, _ = click(e, replies, "O‘zgarishni saqlash")
+    assert "Saqlandi" in replies[0].text
+    assert ledger.balance(a) == 9000000 and ledger.balance(b) == 2000000
+    assert ledger.balance(debt) == 1000000
+    assert s.one("SELECT COUNT(*) AS n FROM accounts WHERE kind='debt_borrowed'")["n"] == 1
+
+
+def test_inline_loan_date_can_be_corrected_back_within_tracking_history(tmp_path):
+    s = Store(tmp_path / "db")
+    ledger = Ledger(s)
+    e = Engine(s)
+    ledger.create_account("Cash", "UZS", 0, "2026-10-01")
+    replies = e.message("20000 qarz oldim", 1, NOW)
+    replies, _ = click(e, replies, "Cash")
+    replies = e.message("Person", 2, NOW)
+    replies, _ = click(e, replies, "Saqlash")
+    replies, _ = click(e, replies, "Tuzatish")
+    replies, _ = click(e, replies, "Sana")
+    replies, _ = click(e, replies, "Kecha")
+    replies, _ = click(e, replies, "O‘zgarishni saqlash")
+    assert "Saqlandi" in replies[0].text
+    assert s.one("SELECT day FROM operations WHERE status='active'")["day"] == "2026-11-01"
+
+
+def test_stale_opening_draft_cannot_change_deleted_history(tmp_path):
+    s = Store(tmp_path / "db")
+    ledger = Ledger(s)
+    e = Engine(s)
+    a = ledger.create_account("Cash", "UZS", 10000000, "2026-10-01")
+    replies = e.callback(f"opening:{a}", NOW)
+    replies = e.message("200000", 1, NOW)
+    replies, _ = click(e, replies, "Bugun")
+    ledger.delete_account(a, 10000000, NOW.date().isoformat())
+    replies, _ = click(e, replies, "Saqlash")
+    assert ledger.account(a)["opening"] == 10000000
+    assert ledger.balances() == []

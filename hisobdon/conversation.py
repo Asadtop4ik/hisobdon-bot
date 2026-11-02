@@ -113,8 +113,12 @@ class Engine:
         elif self.s.get("active_input") == did:
             self.s.set("active_input", None)
         buttons = [(label, f"d:{did}:{d['rev']}:{i}") for i, (label, _) in enumerate(options)]
+        columns = 2 if d["mode"] == "operation" and step == "kind" else 1
         return [
-            Reply(text, rows(buttons) + [[("Qoralamani bekor qilish", f"z:{did}")], [("Menyu", "m:menu")]])
+            Reply(
+                text,
+                rows(buttons, columns) + [[("Qoralamani bekor qilish", f"z:{did}")], [("Menyu", "m:menu")]],
+            )
         ]
 
     def message(self, text, message_id, now):
